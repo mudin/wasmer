@@ -94,6 +94,7 @@ pub fn ___syscall5(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int 
 }
 
 // chown
+#[cfg(not(feature = "vfs"))]
 pub fn ___syscall212(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int {
     debug!("emscripten::___syscall212 (chown) {}", _which);
 
@@ -106,7 +107,24 @@ pub fn ___syscall212(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
     unsafe { chown(pathname_addr, owner, group) }
 }
 
+// chown
+#[cfg(feature = "vfs")]
+pub fn ___syscall212(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int {
+    debug!("emscripten::___syscall212 (chown) {}", _which);
+
+    let pathname: u32 = varargs.get(ctx);
+    let owner: u32 = varargs.get(ctx);
+    let group: u32 = varargs.get(ctx);
+
+    let pathname_addr = emscripten_memory_pointer!(ctx.memory(0), pathname) as *const i8;
+
+    debug!("syscall `chown` always returns 0");
+    //    unsafe { chown(pathname_addr, owner, group) }
+    0
+}
+
 // mkdir
+#[cfg(not(feature = "vfs"))]
 pub fn ___syscall39(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int {
     debug!("emscripten::___syscall39 (mkdir) {}", _which);
     let pathname: u32 = varargs.get(ctx);
@@ -116,6 +134,7 @@ pub fn ___syscall39(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int
 }
 
 // getgid
+#[cfg(not(feature = "vfs"))]
 pub fn ___syscall201(_ctx: &mut Ctx, _one: i32, _two: i32) -> i32 {
     debug!("emscripten::___syscall201 (getgid)");
     unsafe {
@@ -280,10 +299,12 @@ pub fn ___syscall102(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
 
             // Debug received address
             let _proper_address = address as *const GuestSockaddrIn;
-            debug!(
+            unsafe {
+                debug!(
                     "=> address.sin_family: {:?}, address.sin_port: {:?}, address.sin_addr.s_addr: {:?}",
                     (*_proper_address).sin_family, (*_proper_address).sin_port, (*_proper_address).sin_addr.s_addr
                 );
+            }
 
             let status = unsafe { bind(socket, address, address_len) };
             // debug!("=> status: {}", status);
@@ -461,7 +482,8 @@ pub fn ___syscall102(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
     }
 }
 
-// pread
+/// pread
+#[cfg(not(feature = "vfs"))]
 pub fn ___syscall180(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int {
     debug!("emscripten::___syscall180 (pread) {}", _which);
     let fd: i32 = varargs.get(ctx);
@@ -478,7 +500,8 @@ pub fn ___syscall180(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
     unsafe { pread(fd, buf_ptr, count as _, offset) as _ }
 }
 
-// pwrite
+/// pwrite
+#[cfg(not(feature = "vfs"))]
 pub fn ___syscall181(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int {
     debug!("emscripten::___syscall181 (pwrite) {}", _which);
     let fd: i32 = varargs.get(ctx);
