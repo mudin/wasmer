@@ -242,7 +242,7 @@ pub fn run_emscripten_instance(
         data.vfs = match module.info().custom_sections.get("wasmer:fs") {
             Some(bytes) => match Vfs::from_compressed_bytes(&bytes[..]) {
                 Ok(vfs_backing) => Some(vfs_backing),
-                Err(e) => None,
+                Err(_) => None,
             },
             None => None,
         };

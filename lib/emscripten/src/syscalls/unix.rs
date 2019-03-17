@@ -8,7 +8,6 @@ use libc::{
     c_char,
     c_int,
     c_void,
-    chown,
     // fcntl, setsockopt, getppid
     connect,
     dup2,
@@ -22,11 +21,8 @@ use libc::{
     ioctl,
     // iovec,
     listen,
-    mkdir,
     msghdr,
     pid_t,
-    pread,
-    pwrite,
     // readv,
     recvfrom,
     recvmsg,
@@ -104,23 +100,7 @@ pub fn ___syscall212(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
 
     let pathname_addr = emscripten_memory_pointer!(ctx.memory(0), pathname) as *const i8;
 
-    unsafe { chown(pathname_addr, owner, group) }
-}
-
-// chown
-#[cfg(feature = "vfs")]
-pub fn ___syscall212(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int {
-    debug!("emscripten::___syscall212 (chown) {}", _which);
-
-    let pathname: u32 = varargs.get(ctx);
-    let owner: u32 = varargs.get(ctx);
-    let group: u32 = varargs.get(ctx);
-
-    let pathname_addr = emscripten_memory_pointer!(ctx.memory(0), pathname) as *const i8;
-
-    debug!("syscall `chown` always returns 0");
-    //    unsafe { chown(pathname_addr, owner, group) }
-    0
+    unsafe { libc::chown(pathname_addr, owner, group) }
 }
 
 // mkdir
@@ -130,7 +110,7 @@ pub fn ___syscall39(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int
     let pathname: u32 = varargs.get(ctx);
     let mode: u32 = varargs.get(ctx);
     let pathname_addr = emscripten_memory_pointer!(ctx.memory(0), pathname) as *const i8;
-    unsafe { mkdir(pathname_addr, mode as _) }
+    unsafe { libc::mkdir(pathname_addr, mode as _) }
 }
 
 // getgid
@@ -299,12 +279,10 @@ pub fn ___syscall102(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
 
             // Debug received address
             let _proper_address = address as *const GuestSockaddrIn;
-            unsafe {
-                debug!(
+            debug!(
                     "=> address.sin_family: {:?}, address.sin_port: {:?}, address.sin_addr.s_addr: {:?}",
                     (*_proper_address).sin_family, (*_proper_address).sin_port, (*_proper_address).sin_addr.s_addr
                 );
-            }
 
             let status = unsafe { bind(socket, address, address_len) };
             // debug!("=> status: {}", status);
@@ -497,7 +475,7 @@ pub fn ___syscall180(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
 
     let buf_ptr = emscripten_memory_pointer!(ctx.memory(0), buf) as _;
 
-    unsafe { pread(fd, buf_ptr, count as _, offset) as _ }
+    unsafe { libc::pread(fd, buf_ptr, count as _, offset) as _ }
 }
 
 /// pwrite
@@ -514,7 +492,7 @@ pub fn ___syscall181(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
     let offset: i64 = varargs.get(ctx);
 
     let buf_ptr = emscripten_memory_pointer!(ctx.memory(0), buf) as _;
-    let status = unsafe { pwrite(fd, buf_ptr, count as _, offset) as _ };
+    let status = unsafe { libc::pwrite(fd, buf_ptr, count as _, offset) as _ };
     debug!(
         "=> fd: {}, buf: {}, count: {}, offset: {} = status:{}",
         fd, buf, count, offset, status

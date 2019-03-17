@@ -199,6 +199,10 @@ impl Vfs {
         let path = convert_to_absolute_path(path);
         self.repo.metadata(path).map_err(|e| e.into())
     }
+
+    pub fn make_dir<P: AsRef<Path>>(&mut self, path: P) -> Result<(), failure::Error> {
+        self.repo.create_dir_all(path).map_err(|e| e.into())
+    }
 }
 
 #[derive(Debug, Fail)]

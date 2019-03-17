@@ -16,7 +16,9 @@ pub use self::windows::*;
 #[cfg(feature = "vfs")]
 pub use self::vfs::*;
 
+#[cfg(not(feature = "vfs"))]
 use super::utils::copy_stat_into_wasm;
+
 use super::varargs::VarArgs;
 use byteorder::{ByteOrder, LittleEndian};
 /// NOTE: TODO: These syscalls only support wasm_32 for now because they assume offsets are u32
@@ -27,10 +29,7 @@ use libc::{
     c_void,
     chdir,
     // fcntl, setsockopt, getppid
-    close,
-    dup2,
     exit,
-    fstat,
     getpid,
     // iovec,
     lseek,
@@ -38,14 +37,12 @@ use libc::{
     // readv,
     rmdir,
     // writev,
-    stat,
     write,
     // sockaddr_in,
 };
 use wasmer_runtime_core::vm::Ctx;
 
 use super::env;
-use crate::utils::read_string_from_wasm;
 use std::slice;
 
 /// exit
@@ -90,7 +87,7 @@ pub fn ___syscall6(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int 
     debug!("emscripten::___syscall6 (close) {}", _which);
     let fd: i32 = varargs.get(ctx);
     debug!("fd: {}", fd);
-    unsafe { close(fd) }
+    unsafe { libc::close(fd) }
 }
 
 // chdir
@@ -176,7 +173,7 @@ pub fn ___syscall63(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int
     let src: i32 = varargs.get(ctx);
     let dst: i32 = varargs.get(ctx);
 
-    unsafe { dup2(src, dst) }
+    unsafe { libc::dup2(src, dst) }
 }
 
 // getppid
@@ -379,8 +376,8 @@ pub fn ___syscall195(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
     let pathname_addr = emscripten_memory_pointer!(ctx.memory(0), pathname) as *const i8;
 
     unsafe {
-        let mut _stat: stat = std::mem::zeroed();
-        let ret = stat(pathname_addr, &mut _stat);
+        let mut _stat: libc::stat = std::mem::zeroed();
+        let ret = libc::stat(pathname_addr, &mut _stat);
         debug!("ret: {}", ret);
         if ret != 0 {
             return ret;
@@ -399,7 +396,7 @@ pub fn ___syscall197(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
 
     unsafe {
         let mut stat = std::mem::zeroed();
-        let ret = fstat(fd, &mut stat);
+        let ret = libc::fstat(fd, &mut stat);
         debug!("ret: {}", ret);
         if ret != 0 {
             return ret;

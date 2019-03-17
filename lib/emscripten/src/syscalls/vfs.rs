@@ -1,7 +1,6 @@
 use crate::utils::{copy_stat_into_wasm, read_string_from_wasm};
 use crate::varargs::VarArgs;
 use libc::stat;
-use std::ffi::c_void;
 use std::os::raw::c_int;
 use std::slice;
 use wasmer_runtime_core::vm::Ctx;
@@ -28,10 +27,12 @@ pub fn ___syscall3(ctx: &mut Ctx, _which: i32, mut varargs: VarArgs) -> i32 {
 /// write
 pub fn ___syscall4(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int {
     debug!("emscripten::___syscall4 (write - vfs) {}", _which);
+    #[cfg(feature = "debug")]
     let fd: i32 = varargs.get(ctx);
+    #[cfg(feature = "debug")]
     let buf: u32 = varargs.get(ctx);
     let count: i32 = varargs.get(ctx);
-    let buf_addr = emscripten_memory_pointer!(ctx.memory(0), buf) as *const c_void;
+    //    let buf_addr = emscripten_memory_pointer!(ctx.memory(0), buf) as *const c_void;
     debug!("=> NOOP fd: {}, buf: {}, count: {}\n", fd, buf, count);
     count
 }
@@ -79,29 +80,22 @@ pub fn ___syscall15(_ctx: &mut Ctx, _one: i32, _two: i32) -> i32 {
 pub fn ___syscall39(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int {
     debug!("emscripten::___syscall39 (mkdir vfs) {}", _which);
     let pathname: u32 = varargs.get(ctx);
-    let mode: u32 = varargs.get(ctx);
-    let pathname_addr = emscripten_memory_pointer!(ctx.memory(0), pathname) as *const i8;
+    let _mode: u32 = varargs.get(ctx);
     let path = read_string_from_wasm(ctx.memory(0), pathname);
     let root = std::path::PathBuf::from("/");
     let absolute_path = root.join(&path);
-    //    let normalized_path = std::fs::canonicalize(absolute_path).unwrap();
     debug!("mkdir: {}", absolute_path.display());
-    //    unsafe { mkdir(pathname_addr, mode as _) }
     let emscripten_data = crate::env::get_emscripten_data(ctx);
-    if let Some(vfs) = &mut emscripten_data.vfs {
-        match vfs.repo.create_dir(&absolute_path) {
-            Ok(_) => {
-                debug!("mkdir successful: \"{}\"", absolute_path.display());
-                0
-            }
-            Err(_) => {
-                debug!("mkdir failed: \"{}\"", absolute_path.display());
-                -1
-            }
+    let ret = if let Some(vfs) = &mut emscripten_data.vfs {
+        match vfs.make_dir(&absolute_path) {
+            Ok(_) => 0,
+            Err(_) => -1,
         }
     } else {
         -1
-    }
+    };
+    debug!("mkdir returns {}", ret);
+    ret
 }
 
 /// dup2
@@ -134,7 +128,7 @@ pub fn ___syscall180(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
         fd, buf, count, offset
     );
     let buf_addr = emscripten_memory_pointer!(ctx.memory(0), buf) as *mut u8;
-    let mut buf_slice = unsafe { slice::from_raw_parts_mut(buf_addr, count as _) };
+    let buf_slice = unsafe { slice::from_raw_parts_mut(buf_addr, count as _) };
     let mut buf_slice_with_offset: &mut [u8] = &mut buf_slice[(offset as usize)..];
     let emscripten_data = crate::env::get_emscripten_data(ctx);
     let ret = match &mut emscripten_data.vfs {
@@ -148,10 +142,10 @@ pub fn ___syscall180(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
 /// pwrite
 pub fn ___syscall181(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int {
     debug!("emscripten::___syscall181 (pwrite) {}", _which);
-    let fd: i32 = varargs.get(ctx);
-    let buf: u32 = varargs.get(ctx);
+    let _fd: i32 = varargs.get(ctx);
+    let _buf: u32 = varargs.get(ctx);
     let count: u32 = varargs.get(ctx);
-    let offset: i64 = varargs.get(ctx);
+    let _offset: i64 = varargs.get(ctx);
     count as _
 }
 
@@ -161,8 +155,6 @@ pub fn ___syscall195(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
     debug!("emscripten::___syscall195 (stat64) {}", _which);
     let pathname: u32 = varargs.get(ctx);
     let buf: u32 = varargs.get(ctx);
-
-    let pathname_addr = emscripten_memory_pointer!(ctx.memory(0), pathname) as *const i8;
     let path_string = read_string_from_wasm(ctx.memory(0), pathname);
     debug!("path extract for `stat` syscall: {}", &path_string);
     let path = std::path::PathBuf::from(path_string);
@@ -219,5 +211,15 @@ pub fn ___syscall197(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
 // getgid
 pub fn ___syscall201(_ctx: &mut Ctx, _one: i32, _two: i32) -> i32 {
     debug!("emscripten::___syscall201 (getgid)");
+    0
+}
+
+// chown
+pub fn ___syscall212(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int {
+    debug!("emscripten::___syscall212 (chown) {}", _which);
+    let _pathname: u32 = varargs.get(ctx);
+    let _owner: u32 = varargs.get(ctx);
+    let _group: u32 = varargs.get(ctx);
+    debug!("syscall `chown` always returns 0");
     0
 }
