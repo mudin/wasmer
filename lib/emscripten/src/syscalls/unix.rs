@@ -210,6 +210,7 @@ pub fn ___syscall54(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int
 }
 
 // socketcall
+#[cfg(not(feature = "vfs"))]
 #[allow(clippy::cast_ptr_alignment)]
 pub fn ___syscall102(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int {
     debug!("emscripten::___syscall102 (socketcall) {}", _which);
@@ -279,11 +280,12 @@ pub fn ___syscall102(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
 
             // Debug received address
             let _proper_address = address as *const GuestSockaddrIn;
-            debug!(
+            unsafe {
+                debug!(
                     "=> address.sin_family: {:?}, address.sin_port: {:?}, address.sin_addr.s_addr: {:?}",
                     (*_proper_address).sin_family, (*_proper_address).sin_port, (*_proper_address).sin_addr.s_addr
                 );
-
+            }
             let status = unsafe { bind(socket, address, address_len) };
             // debug!("=> status: {}", status);
             debug!(

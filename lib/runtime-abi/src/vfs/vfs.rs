@@ -1,7 +1,7 @@
 use crate::vfs::vfs_header::{header_from_bytes, ArchiveType, CompressionType};
 use std::collections::BTreeMap;
 use std::io;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use tar::EntryType;
@@ -9,9 +9,15 @@ use zbox::{init_env, OpenOptions, Repo, RepoOpener};
 
 pub type Fd = isize;
 
+#[derive(Debug)]
+pub enum File {
+    ZboxFile(zbox::File),
+    Socket(Fd),
+}
+
 pub struct Vfs {
     repo: Repo,
-    fd_map: BTreeMap<Fd, Rc<zbox::File>>,
+    pub fd_map: BTreeMap<Fd, Rc<File>>,
     pub import_errors: Vec<VfsAggregateError>,
 }
 
@@ -47,67 +53,50 @@ impl Vfs {
         let stdin = repo.create_file(PathBuf::from("/dev/stdin"))?;
         let stdout = repo.create_file(PathBuf::from("/dev/stdout"))?;
         let stderr = repo.create_file(PathBuf::from("/dev/stderr"))?;
-        fd_map.insert(0, Rc::new(stdin));
-        fd_map.insert(1, Rc::new(stdout));
-        fd_map.insert(2, Rc::new(stderr));
+        fd_map.insert(0, Rc::new(File::ZboxFile(stdin)));
+        fd_map.insert(1, Rc::new(File::ZboxFile(stdout)));
+        fd_map.insert(2, Rc::new(File::ZboxFile(stderr)));
 
         let errors = tar::Archive::new(tar_bytes)
             .entries()?
             .map(|entry| {
-                let mut entry = entry.map_err(|e| VfsAggregateError::EntryError(e))?;
-                let path = entry.path().map_err(|e| VfsAggregateError::IoError(e))?;
+                let mut entry: tar::Entry<Reader> = entry?;
+                let path = entry.path()?;
                 let path = convert_to_absolute_path(path);
-
-                // create the directory this file is in, if it does not already exist
-                if let Some(parent) = path.parent() {
-                    if !repo.path_exists(&parent) {
-                        let _ = repo
-                            .create_dir_all(parent)
-                            .map_err(|e| VfsAggregateError::ZboxError(e))?;
+                let result = match (entry.header().entry_type(), path.parent()) {
+                    (EntryType::Regular, Some(parent)) => {
+                        if let Err(e) = repo.create_dir_all(parent) {
+                            if e == zbox::Error::AlreadyExists || e == zbox::Error::IsRoot {
+                            } else {
+                                return Err(VfsAggregateError::ZboxError(e));
+                            }
+                        } else {
+                        }
+                        let mut file = repo.create_file(&path)?;
+                        if entry.header().size().unwrap_or(0) > 0 {
+                            io::copy(&mut entry, &mut file)?;
+                            file.finish()?;
+                        }
                     }
-                }
-
-                // if this is a directory, just stop
-                if entry.header().entry_type() == EntryType::Directory {
-                    return Ok(());
-                }
-
-                // if the size is greater than zero, open the file for writing
-                match entry.header().size() {
-                    Ok(size) if size > 0 => {
-                        let mut file = OpenOptions::new()
-                            .create(true)
-                            .write(true)
-                            .open(&mut repo, &path)
-                            .map_err(|e| VfsAggregateError::ZboxError(e))?;
-                        let _ = io::copy(&mut entry, &mut file)
-                            .map_err(|e| VfsAggregateError::IoError(e))?;
-                        let _ = file.finish();
-                        Ok(())
+                    (EntryType::Directory, _) => {
+                        if let Err(e) = repo.create_dir_all(path) {
+                            if e == zbox::Error::AlreadyExists || e == zbox::Error::IsRoot {
+                            } else {
+                                return Err(VfsAggregateError::ZboxError(e));
+                            }
+                        } else {
+                        }
                     }
-                    // otherwise just create the file
-                    _ => {
-                        let _ = repo
-                            .create_file(&path)
-                            .map_err(|e| VfsAggregateError::ZboxError(e))?;
-                        Ok(())
-                    }
-                }
+                    _ => return Err(VfsAggregateError::UnsupportedFileType),
+                };
+                Ok(())
             })
-            // collect all the errors
-            .filter_map(|entry| {
-                if entry.is_err() {
-                    Some(entry.unwrap_err())
-                } else {
-                    None
-                }
-            })
-            .collect();
+            .collect::<Vec<Result<(), VfsAggregateError>>>();
 
         let vfs = Vfs {
             repo,
             fd_map,
-            import_errors: errors,
+            import_errors: vec![],
         };
         Ok(vfs)
     }
@@ -119,7 +108,8 @@ impl Vfs {
             .get_mut(&fd)
             .ok_or(VfsError::FileDescriptorNotExist(fd))?;
         match Rc::get_mut(&mut data) {
-            Some(file) => file.read(buf).map_err(|e| e.into()),
+            Some(File::ZboxFile(file)) => file.read(buf).map_err(|e| e.into()),
+            Some(_) => unimplemented!(),
             None => Err(VfsError::CouldNotGetMutableReferenceToFile.into()),
         }
     }
@@ -127,7 +117,7 @@ impl Vfs {
     /// like open(2), creates a file descriptor for the path if it exists
     pub fn open_file<P: AsRef<Path>>(&mut self, path: P) -> Result<Fd, failure::Error> {
         let path = convert_to_absolute_path(path);
-        let file = OpenOptions::new().open(&mut self.repo, &path)?;
+        let file = OpenOptions::new().write(true).open(&mut self.repo, &path)?;
         let mut next_lowest_fd = 0;
         for (fd, _) in self.fd_map.iter() {
             if *fd == next_lowest_fd {
@@ -138,8 +128,22 @@ impl Vfs {
                 break;
             }
         }
-        self.fd_map.insert(next_lowest_fd, Rc::new(file));
+        self.fd_map.insert(next_lowest_fd, Rc::new(File::ZboxFile(file)));
         Ok(next_lowest_fd)
+    }
+
+    fn next_lowest(&self) -> Fd {
+        let mut next_lowest_fd = 0;
+        for (fd, _) in self.fd_map.iter() {
+            if *fd == next_lowest_fd {
+                next_lowest_fd += 1;
+            } else if *fd < next_lowest_fd {
+                panic!("Should not be here.");
+            } else {
+                break;
+            }
+        }
+        next_lowest_fd
     }
 
     /// like dup2
@@ -175,9 +179,10 @@ impl Vfs {
     }
 
     /// close
-    pub fn close(&mut self, fd: Fd) -> Result<(), failure::Error> {
+    pub fn close(&mut self, fd: Fd) -> Result<(), VfsError> {
         if let None = self.fd_map.remove(&fd) {
-            Err(VfsError::FileDescriptorNotExist(fd).into())
+            eprintln!("closing issue.");
+            Err(VfsError::FileDescriptorNotExist(fd))
         } else {
             Ok(())
         }
@@ -186,8 +191,19 @@ impl Vfs {
     /// get metadata with file descriptor
     pub fn get_file_metadata(&self, fd: Fd) -> Result<zbox::Metadata, failure::Error> {
         match self.fd_map.get(&fd) {
-            Some(file) => file.clone().metadata().map_err(|e| e.into()),
             None => Err(VfsError::FileWithFileDescriptorNotExist(fd).into()),
+            Some(file) => {
+//                let file = file.clone();
+                let file = file.clone();
+                match &*file {
+                    File::ZboxFile(f) => {
+                        f.metadata().map_err(|e| e.into())
+                    },
+                    File::Socket(fd) => {
+                        unimplemented!()
+                    },
+                }
+            }
         }
     }
 
@@ -202,6 +218,48 @@ impl Vfs {
 
     pub fn make_dir<P: AsRef<Path>>(&mut self, path: P) -> Result<(), failure::Error> {
         self.repo.create_dir_all(path).map_err(|e| e.into())
+    }
+
+    /// write to a file with the file descriptor
+    pub fn write_file(
+        &mut self,
+        fd: Fd,
+        buf: &[u8],
+        count: usize,
+        offset: usize,
+    ) -> Result<usize, failure::Error> {
+        let mut file = self
+            .fd_map
+            .get_mut(&fd)
+            .ok_or(VfsError::FileWithFileDescriptorNotExist(fd))?;
+        let file = Rc::get_mut(&mut file).unwrap();
+        if let File::ZboxFile(file) = file {
+            file.seek(SeekFrom::Start(offset as u64))?;
+            let _ = file.write_once(&buf[..count])?;
+        }
+        Ok(count)
+    }
+
+    pub fn add_external_socket(&mut self, fd: Fd) -> Result<Fd, failure::Error> {
+        let file = File::Socket(fd);
+        let fd = self.next_lowest();
+        self.fd_map.insert(fd, Rc::new(file));
+        Ok(fd)
+    }
+
+    pub fn get_external_socket(&self, fd: Fd) -> Result<Fd, failure::Error> {
+        match self.fd_map.get(&fd) {
+            Some(file) => {
+                let file = file.clone();
+                match &*file {
+                    File::Socket(fd) => {
+                        Ok(*fd)
+                    },
+                    _ => { unimplemented!() }
+                }
+            },
+            None => { unimplemented!() },
+        }
     }
 }
 
@@ -227,6 +285,20 @@ pub enum VfsAggregateError {
     IoError(std::io::Error),
     #[fail(display = "Zbox error.")]
     ZboxError(zbox::Error),
+    #[fail(display = "Unsupported file type.")]
+    UnsupportedFileType,
+}
+
+impl std::convert::From<std::io::Error> for VfsAggregateError {
+    fn from(error: std::io::Error) -> VfsAggregateError {
+        VfsAggregateError::EntryError(error)
+    }
+}
+
+impl std::convert::From<zbox::Error> for VfsAggregateError {
+    fn from(error: zbox::Error) -> VfsAggregateError {
+        VfsAggregateError::ZboxError(error)
+    }
 }
 
 fn convert_to_absolute_path<P: AsRef<Path>>(path: P) -> PathBuf {
