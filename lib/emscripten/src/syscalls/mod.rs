@@ -7,6 +7,9 @@ mod windows;
 #[cfg(feature = "vfs")]
 mod vfs;
 
+#[cfg(feature = "vfs")]
+mod emscripten_vfs;
+
 #[cfg(unix)]
 pub use self::unix::*;
 
@@ -15,6 +18,9 @@ pub use self::windows::*;
 
 #[cfg(feature = "vfs")]
 pub use self::vfs::*;
+
+#[cfg(feature = "vfs")]
+pub use self::emscripten_vfs::*;
 
 #[cfg(not(feature = "vfs"))]
 use super::utils::copy_stat_into_wasm;

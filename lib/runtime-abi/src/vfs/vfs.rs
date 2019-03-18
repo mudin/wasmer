@@ -1,23 +1,19 @@
 use crate::vfs::vfs_header::{header_from_bytes, ArchiveType, CompressionType};
 use std::collections::BTreeMap;
 use std::io;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use tar::EntryType;
 use zbox::{init_env, OpenOptions, Repo, RepoOpener};
+use crate::vfs::file_like::FileLike;
+use crate::vfs::virtual_file::VirtualFile;
 
 pub type Fd = isize;
 
-#[derive(Debug)]
-pub enum File {
-    ZboxFile(zbox::File),
-    Socket(Fd),
-}
-
 pub struct Vfs {
     repo: Repo,
-    pub fd_map: BTreeMap<Fd, Rc<File>>,
+    pub fd_map: BTreeMap<Fd, Rc<dyn FileLike>>,
     pub import_errors: Vec<VfsAggregateError>,
 }
 
@@ -46,16 +42,18 @@ impl Vfs {
             .open("mem://wasmer_fs", "")
             .unwrap();
 
-        let mut fd_map = BTreeMap::new();
+        let mut fd_map: BTreeMap<isize, Rc<dyn FileLike>> = BTreeMap::new();
 
         // TODO: What to do about the creation of the device files?
         let _ = repo.create_dir(PathBuf::from("/dev/"));
         let stdin = repo.create_file(PathBuf::from("/dev/stdin"))?;
         let stdout = repo.create_file(PathBuf::from("/dev/stdout"))?;
         let stderr = repo.create_file(PathBuf::from("/dev/stderr"))?;
-        fd_map.insert(0, Rc::new(File::ZboxFile(stdin)));
-        fd_map.insert(1, Rc::new(File::ZboxFile(stdout)));
-        fd_map.insert(2, Rc::new(File::ZboxFile(stderr)));
+
+        use crate::vfs::device_file;
+        fd_map.insert(0, Rc::new(device_file::Stdin{}));
+        fd_map.insert(1, Rc::new(device_file::Stdin{})); // TODO FIX ME
+        fd_map.insert(2, Rc::new(device_file::Stdin{}));
 
         let errors = tar::Archive::new(tar_bytes)
             .entries()?
@@ -108,8 +106,7 @@ impl Vfs {
             .get_mut(&fd)
             .ok_or(VfsError::FileDescriptorNotExist(fd))?;
         match Rc::get_mut(&mut data) {
-            Some(File::ZboxFile(file)) => file.read(buf).map_err(|e| e.into()),
-            Some(_) => unimplemented!(),
+            Some(file) => file.read(buf),
             None => Err(VfsError::CouldNotGetMutableReferenceToFile.into()),
         }
     }
@@ -128,7 +125,8 @@ impl Vfs {
                 break;
             }
         }
-        self.fd_map.insert(next_lowest_fd, Rc::new(File::ZboxFile(file)));
+        let virtual_file = VirtualFile::new(file);
+        self.fd_map.insert(next_lowest_fd, Rc::new(virtual_file));
         Ok(next_lowest_fd)
     }
 
@@ -179,30 +177,32 @@ impl Vfs {
     }
 
     /// close
-    pub fn close(&mut self, fd: Fd) -> Result<(), VfsError> {
-        if let None = self.fd_map.remove(&fd) {
-            eprintln!("closing issue.");
-            Err(VfsError::FileDescriptorNotExist(fd))
-        } else {
+    pub fn close(&mut self, fd: Fd) -> Result<(), failure::Error> {
+        if let Some(file) = self.fd_map.remove(&fd) {
+            file.close()
+        }
+        else {
+            // this file did not exist in the virtual file system, maybe throw an error in the future
             Ok(())
         }
     }
 
     /// get metadata with file descriptor
-    pub fn get_file_metadata(&self, fd: Fd) -> Result<zbox::Metadata, failure::Error> {
+    pub fn get_file_metadata(&self, fd: Fd) -> Result<crate::vfs::file_like::Metadata, failure::Error> {
         match self.fd_map.get(&fd) {
             None => Err(VfsError::FileWithFileDescriptorNotExist(fd).into()),
             Some(file) => {
 //                let file = file.clone();
                 let file = file.clone();
-                match &*file {
-                    File::ZboxFile(f) => {
-                        f.metadata().map_err(|e| e.into())
-                    },
-                    File::Socket(fd) => {
-                        unimplemented!()
-                    },
-                }
+                file.metadata()
+//                match &*file {
+//                    File::ZboxFile(f) => {
+//                        f.metadata().map_err(|e| e.into())
+//                    },
+//                    File::Socket(fd) => {
+//                        unimplemented!()
+//                    },
+//                }
             }
         }
     }
@@ -233,33 +233,7 @@ impl Vfs {
             .get_mut(&fd)
             .ok_or(VfsError::FileWithFileDescriptorNotExist(fd))?;
         let file = Rc::get_mut(&mut file).unwrap();
-        if let File::ZboxFile(file) = file {
-            file.seek(SeekFrom::Start(offset as u64))?;
-            let _ = file.write_once(&buf[..count])?;
-        }
-        Ok(count)
-    }
-
-    pub fn add_external_socket(&mut self, fd: Fd) -> Result<Fd, failure::Error> {
-        let file = File::Socket(fd);
-        let fd = self.next_lowest();
-        self.fd_map.insert(fd, Rc::new(file));
-        Ok(fd)
-    }
-
-    pub fn get_external_socket(&self, fd: Fd) -> Result<Fd, failure::Error> {
-        match self.fd_map.get(&fd) {
-            Some(file) => {
-                let file = file.clone();
-                match &*file {
-                    File::Socket(fd) => {
-                        Ok(*fd)
-                    },
-                    _ => { unimplemented!() }
-                }
-            },
-            None => { unimplemented!() },
-        }
+        file.write(buf, count, offset)
     }
 }
 

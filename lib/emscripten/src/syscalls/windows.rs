@@ -107,6 +107,7 @@ pub fn ___syscall54(_ctx: &mut Ctx, which: c_int, mut _varargs: VarArgs) -> c_in
 }
 
 // socketcall
+#[cfg(not(feature = "vfs"))]
 #[allow(clippy::cast_ptr_alignment)]
 pub fn ___syscall102(_ctx: &mut Ctx, which: c_int, mut _varargs: VarArgs) -> c_int {
     debug!("emscripten::___syscall102 (socketcall) {}", which);

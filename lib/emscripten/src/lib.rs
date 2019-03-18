@@ -55,6 +55,9 @@ pub use self::utils::{
 };
 
 #[cfg(feature = "vfs")]
+use crate::syscalls::EmscriptenVfs;
+
+#[cfg(feature = "vfs")]
 use wasmer_runtime_abi::vfs::vfs::Vfs;
 
 // TODO: Magic number - how is this calculated?
@@ -122,7 +125,7 @@ pub struct EmscriptenData<'a> {
     pub dyn_call_vijj: Option<Func<'a, (i32, i32, i32, i32, i32, i32)>>,
 
     #[cfg(feature = "vfs")]
-    pub vfs: Option<Vfs>,
+    pub vfs: Option<EmscriptenVfs>,
 }
 
 impl<'a> EmscriptenData<'a> {
@@ -241,7 +244,10 @@ pub fn run_emscripten_instance(
     {
         data.vfs = match module.info().custom_sections.get("wasmer:fs") {
             Some(bytes) => match Vfs::from_compressed_bytes(&bytes[..]) {
-                Ok(vfs_backing) => Some(vfs_backing),
+                Ok(vfs) => {
+                    let emscripten_vfs = EmscriptenVfs::new(vfs);
+                    Some(emscripten_vfs)
+                },
                 Err(_) => None,
             },
             None => None,
