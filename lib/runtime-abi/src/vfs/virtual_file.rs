@@ -32,6 +32,12 @@ impl FileLike for VirtualFile {
     }
 
     fn metadata(&self) -> Result<Metadata, Error> {
-        unimplemented!()
+        self.zbox_file.metadata()
+            .map(|m| {
+                Metadata {
+                    len: m.len(),
+                    is_file: m.is_file(),
+                }
+            }).map_err(|e: zbox::Error| e.into())
     }
 }
