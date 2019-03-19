@@ -9,7 +9,7 @@ use zbox::{init_env, OpenOptions, Repo, RepoOpener};
 use crate::vfs::file_like::FileLike;
 use crate::vfs::virtual_file::VirtualFile;
 
-pub type Fd = isize;
+pub type Fd = i32;
 
 pub struct Vfs {
     repo: Repo,
@@ -42,7 +42,7 @@ impl Vfs {
             .open("mem://wasmer_fs", "")
             .unwrap();
 
-        let mut fd_map: BTreeMap<isize, Rc<dyn FileLike>> = BTreeMap::new();
+        let mut fd_map: BTreeMap<Fd, Rc<dyn FileLike>> = BTreeMap::new();
 
         // TODO: What to do about the creation of the device files?
         let _ = repo.create_dir(PathBuf::from("/dev/"));
