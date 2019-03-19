@@ -170,9 +170,7 @@ mod tests {
 
     #[cfg(not(any(feature = "llvm", feature = "clif")))]
     fn get_compiler() -> impl Compiler {
-        panic!("compiler not specified, activate a compiler via features");
-        use wasmer_clif_backend::CraneliftCompiler;
-        CraneliftCompiler::new()
+        panic!("compiler not specified, activate a compiler via features")
     }
 
     #[test]
