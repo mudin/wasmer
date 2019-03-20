@@ -1,5 +1,5 @@
-use failure::Error;
 use crate::vfs::file_like::{FileLike, Metadata};
+use failure::Error;
 
 pub struct Stdin;
 pub struct Stdout;
@@ -15,7 +15,7 @@ impl FileLike for Stdin {
     }
 
     fn close(&self) -> Result<(), Error> {
-        unimplemented!()
+        Ok(())
     }
 
     fn metadata(&self) -> Result<Metadata, Error> {
@@ -50,4 +50,3 @@ impl FileLike for Stdin {
 //        unimplemented!()
 //    }
 //}
-

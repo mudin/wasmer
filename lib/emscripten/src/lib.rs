@@ -247,7 +247,7 @@ pub fn run_emscripten_instance(
                 Ok(vfs) => {
                     let emscripten_vfs = EmscriptenVfs::new(vfs);
                     Some(emscripten_vfs)
-                },
+                }
                 Err(_) => None,
             },
             None => None,

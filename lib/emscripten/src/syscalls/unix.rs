@@ -52,7 +52,7 @@ use libc::{
 };
 use wasmer_runtime_core::vm::Ctx;
 
-use std::mem;
+use std::{mem, slice};
 
 // Linking to functions that are not provided by rust libc
 #[cfg(target_os = "macos")]
@@ -168,6 +168,7 @@ pub fn ___syscall330(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> pid_
 }
 
 /// ioctl
+#[cfg(not(feature = "vfs"))]
 pub fn ___syscall54(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int {
     debug!("emscripten::___syscall54 (ioctl) {}", _which);
     let fd: i32 = varargs.get(ctx);
@@ -251,6 +252,8 @@ pub fn ___syscall102(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
                 ioctl(fd, FIOCLEX);
             };
 
+            let err = errno::errno();
+
             type T = u32;
             let payload = 1 as *const T as _;
             unsafe {
@@ -262,6 +265,8 @@ pub fn ___syscall102(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
                     mem::size_of::<T>() as socklen_t,
                 );
             };
+
+            let err2 = errno::errno();
 
             debug!(
                 "=> domain: {} (AF_INET/2), type: {} (SOCK_STREAM/1), protocol: {} = fd: {}",
@@ -435,7 +440,8 @@ pub fn ___syscall102(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
             let value_addr = emscripten_memory_pointer!(ctx.memory(0), value) as _;
             let option_len_addr =
                 emscripten_memory_pointer!(ctx.memory(0), option_len) as *mut socklen_t;
-            unsafe { getsockopt(socket, level, name, value_addr, option_len_addr) }
+            let result = unsafe { getsockopt(socket, level, name, value_addr, option_len_addr) };
+            result
         }
         16 => {
             debug!("socket: sendmsg");
@@ -521,6 +527,7 @@ pub fn ___syscall114(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> pid_
 }
 
 // select
+#[cfg(not(feature = "vfs"))]
 #[allow(clippy::cast_ptr_alignment)]
 pub fn ___syscall142(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int {
     debug!("emscripten::___syscall142 (newselect) {}", _which);
@@ -531,13 +538,44 @@ pub fn ___syscall142(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_in
     let exceptfds: u32 = varargs.get(ctx);
     let _timeout: i32 = varargs.get(ctx);
 
-    assert!(nfds <= 64, "`nfds` must be less than or equal to 64");
-    assert!(exceptfds == 0, "`exceptfds` is not supporrted");
+    let readfds_set_ptr = emscripten_memory_pointer!(ctx.memory(0), readfds) as *mut _;
+    let readfds_set_u8_ptr = readfds_set_ptr as *mut u8;
+    let writefds_set_ptr = emscripten_memory_pointer!(ctx.memory(0), writefds) as *mut _;
+    let writefds_set_u8_ptr = writefds_set_ptr as *mut u8;
+
+    let nfds = nfds as _;
+    let readfds_slice = unsafe { slice::from_raw_parts_mut(readfds_set_u8_ptr, nfds) };
+    let writefds_slice = unsafe { slice::from_raw_parts_mut(writefds_set_u8_ptr, nfds) };
+    let nfds = nfds as _;
+
+    use bit_field::BitArray;
+
+    let mut bits = vec![];
+    for virtual_fd in 0..nfds {
+        let bit_flag = readfds_slice.get_bit(virtual_fd as usize);
+        if !bit_flag {
+            continue;
+        }
+        bits.push(virtual_fd);
+    }
 
     let readfds_ptr = emscripten_memory_pointer!(ctx.memory(0), readfds) as _;
     let writefds_ptr = emscripten_memory_pointer!(ctx.memory(0), writefds) as _;
 
-    unsafe { select(nfds, readfds_ptr, writefds_ptr, 0 as _, 0 as _) }
+    //    let rd = unsafe { libc::read(bits[0], 0 as *mut _, 0)};
+
+    let err = errno::errno();
+
+    let result = unsafe { select(nfds, readfds_ptr, writefds_ptr, 0 as _, 0 as _) };
+
+    assert!(nfds <= 64, "`nfds` must be less than or equal to 64");
+    assert!(exceptfds == 0, "`exceptfds` is not supporrted");
+
+    let err = errno::errno();
+    debug!("gah again: {}", err);
+
+    result
+    //    unsafe { select(nfds, readfds_ptr, writefds_ptr, 0 as _, 0 as _) }
 }
 
 // setpgid

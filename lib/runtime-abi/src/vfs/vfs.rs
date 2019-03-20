@@ -1,13 +1,13 @@
+use crate::vfs::file_like::FileLike;
 use crate::vfs::vfs_header::{header_from_bytes, ArchiveType, CompressionType};
+use crate::vfs::virtual_file::VirtualFile;
 use std::collections::BTreeMap;
 use std::io;
-use std::io::{Read};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use tar::EntryType;
 use zbox::{init_env, OpenOptions, Repo, RepoOpener};
-use crate::vfs::file_like::FileLike;
-use crate::vfs::virtual_file::VirtualFile;
 
 pub type Fd = i32;
 
@@ -51,9 +51,9 @@ impl Vfs {
         let stderr = repo.create_file(PathBuf::from("/dev/stderr"))?;
 
         use crate::vfs::device_file;
-        fd_map.insert(0, Rc::new(device_file::Stdin{}));
-        fd_map.insert(1, Rc::new(device_file::Stdin{})); // TODO FIX ME
-        fd_map.insert(2, Rc::new(device_file::Stdin{}));
+        fd_map.insert(0, Rc::new(device_file::Stdin {}));
+        fd_map.insert(1, Rc::new(device_file::Stdin {})); // TODO FIX ME
+        fd_map.insert(2, Rc::new(device_file::Stdin {}));
 
         let errors = tar::Archive::new(tar_bytes)
             .entries()?
@@ -144,6 +144,18 @@ impl Vfs {
         next_lowest_fd
     }
 
+    /// like dup2, but better for this abstraction layer
+    pub fn duplicate_handle(&mut self, handle: &Fd) -> Fd {
+        let dup = match self.fd_map.get(handle) {
+            Some(file) => file.clone(),
+            None => panic!(),
+        };
+        let new_handle = self.next_lowest();
+        assert!(!self.fd_map.contains_key(&new_handle));
+        self.fd_map.insert(new_handle, dup);
+        new_handle
+    }
+
     /// like dup2
     pub fn duplicate_file_descriptor(
         &mut self,
@@ -177,32 +189,28 @@ impl Vfs {
     }
 
     /// close
-    pub fn close(&mut self, fd: Fd) -> Result<(), failure::Error> {
-        if let Some(file) = self.fd_map.remove(&fd) {
+    pub fn close(&mut self, fd: &Fd) -> Result<(), failure::Error> {
+        let result = if let Some(file) = self.fd_map.remove(fd) {
             file.close()
-        }
-        else {
+        } else {
             // this file did not exist in the virtual file system, maybe throw an error in the future
             Ok(())
-        }
+        };
+        assert!(!self.fd_map.contains_key(&fd));
+        result
     }
 
     /// get metadata with file descriptor
-    pub fn get_file_metadata(&self, fd: Fd) -> Result<crate::vfs::file_like::Metadata, failure::Error> {
+    pub fn get_file_metadata(
+        &self,
+        fd: &Fd,
+    ) -> Result<crate::vfs::file_like::Metadata, failure::Error> {
         match self.fd_map.get(&fd) {
-            None => Err(VfsError::FileWithFileDescriptorNotExist(fd).into()),
+            None => Err(VfsError::FileWithFileDescriptorNotExist(*fd).into()),
             Some(file) => {
-//                let file = file.clone();
+                //                let file = file.clone();
                 let file = file.clone();
                 file.metadata()
-//                match &*file {
-//                    File::ZboxFile(f) => {
-//                        f.metadata().map_err(|e| e.into())
-//                    },
-//                    File::Socket(fd) => {
-//                        unimplemented!()
-//                    },
-//                }
             }
         }
     }
@@ -232,8 +240,12 @@ impl Vfs {
             .fd_map
             .get_mut(&fd)
             .ok_or(VfsError::FileWithFileDescriptorNotExist(fd))?;
-        let file = Rc::get_mut(&mut file).unwrap();
-        file.write(buf, count, offset)
+        let file = Rc::get_mut(&mut file);
+        match file {
+           Some(file) =>  file.write(buf, count, offset),
+            None => Ok(count) // BAD!!! Switch to Rc<RefCell>
+        }
+
     }
 }
 

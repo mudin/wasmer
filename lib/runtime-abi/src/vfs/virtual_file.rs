@@ -8,9 +8,7 @@ pub struct VirtualFile {
 
 impl VirtualFile {
     pub fn new(file: zbox::File) -> Self {
-        VirtualFile {
-            zbox_file: file,
-        }
+        VirtualFile { zbox_file: file }
     }
 }
 
@@ -32,12 +30,12 @@ impl FileLike for VirtualFile {
     }
 
     fn metadata(&self) -> Result<Metadata, Error> {
-        self.zbox_file.metadata()
-            .map(|m| {
-                Metadata {
-                    len: m.len(),
-                    is_file: m.is_file(),
-                }
-            }).map_err(|e: zbox::Error| e.into())
+        self.zbox_file
+            .metadata()
+            .map(|m| Metadata {
+                len: m.len(),
+                is_file: m.is_file(),
+            })
+            .map_err(|e: zbox::Error| e.into())
     }
 }
