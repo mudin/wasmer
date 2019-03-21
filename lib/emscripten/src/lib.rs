@@ -465,6 +465,7 @@ pub fn generate_emscripten_env(globals: &mut EmscriptenGlobals) -> ImportObject 
             "_getpagesize" => func!(crate::env::_getpagesize),
             "_sysconf" => func!(crate::env::_sysconf),
             "_getaddrinfo" => func!(crate::env::_getaddrinfo),
+            "_initgroups" => func!(crate::env::_initgroups),
 
             // Null func
             "nullFunc_i" => func!(crate::nullfunc::nullfunc_i),

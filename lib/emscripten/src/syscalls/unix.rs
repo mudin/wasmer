@@ -114,13 +114,14 @@ pub fn ___syscall39(ctx: &mut Ctx, _which: c_int, mut varargs: VarArgs) -> c_int
 }
 
 // getgid
-#[cfg(not(feature = "vfs"))]
+//#[cfg(not(feature = "vfs"))]
 pub fn ___syscall201(_ctx: &mut Ctx, _one: i32, _two: i32) -> i32 {
     debug!("emscripten::___syscall201 (getgid)");
-    unsafe {
+    let result  = unsafe {
         // Maybe fix: Emscripten returns 0 always
         getgid() as i32
-    }
+    };
+    result
 }
 
 // getgid32
